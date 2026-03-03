@@ -106,7 +106,24 @@ public class PatientService(HospitalDbContext context) : IPatientService
         patient.Phone     = dto.Phone;
         patient.Address   = dto.Address;
 
-        await context.SaveChangesAsync(ct);
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            var entry = ex.Entries.Single();
+            var dbValues = await entry.GetDatabaseValuesAsync(ct);
+
+            if (dbValues is null)
+                throw new InvalidOperationException("The record was deleted by another user.");
+
+            throw new ConcurrencyConflictException(
+                "The record was modified by another user. Please review and retry.",
+                clientValues: entry.CurrentValues.ToObject(),
+                databaseValues: dbValues.ToObject()
+            );
+        }
         return ToDto(patient);
     }
 

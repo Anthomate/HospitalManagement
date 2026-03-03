@@ -15,5 +15,11 @@ public class MedicalStaffConfiguration : IEntityTypeConfiguration<MedicalStaff>
         builder.HasIndex(m => m.LicenseNumber)
             .IsUnique()
             .HasDatabaseName("IX_StaffMembers_LicenseNumber");
+        
+        builder.Property(m => m.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
     }
 }

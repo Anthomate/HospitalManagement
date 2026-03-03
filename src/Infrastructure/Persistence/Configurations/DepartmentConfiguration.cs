@@ -40,6 +40,12 @@ public class DepartmentConfiguration : IEntityTypeConfiguration<Department>
             .HasColumnName("UpdatedAt")
             .IsRequired();
         
+        builder.Property(d => d.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
+        
         builder.HasOne(d => d.ParentDepartment)
             .WithMany(d => d.SubDepartments)
             .HasForeignKey(d => d.ParentDepartmentId)

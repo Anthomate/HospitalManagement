@@ -6,4 +6,6 @@ public abstract class BaseEntity
     
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
+    
+    public uint RowVersion { get; private set; }
 }

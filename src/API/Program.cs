@@ -1,3 +1,4 @@
+using API.Middleware;
 using Infrastructure;
 using Scalar.AspNetCore;
 
@@ -15,6 +16,8 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
+
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
 app.MapControllers();

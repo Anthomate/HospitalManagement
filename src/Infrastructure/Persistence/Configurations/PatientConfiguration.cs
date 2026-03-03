@@ -76,6 +76,22 @@ public class PatientConfiguration : IEntityTypeConfiguration<Patient>
             .HasColumnName("UpdatedAt")
             .IsRequired();
         
+        builder.Property(p => p.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
+        
+        builder.HasIndex(p => p.LastName)
+            .HasDatabaseName("IX_Patients_LastName_Trgm")
+            .HasMethod("gin")
+            .HasOperators("gin_trgm_ops");
+
+        builder.HasIndex(p => p.FirstName)
+            .HasDatabaseName("IX_Patients_FirstName_Trgm")
+            .HasMethod("gin")
+            .HasOperators("gin_trgm_ops");
+        
         builder.HasIndex(p => p.RecordNumber)
             .IsUnique()
             .HasDatabaseName("IX_Patients_RecordNumber");

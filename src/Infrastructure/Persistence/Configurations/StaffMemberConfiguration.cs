@@ -66,6 +66,12 @@ public class StaffMemberConfiguration : IEntityTypeConfiguration<StaffMember>
             .HasColumnName("UpdatedAt")
             .IsRequired();
         
+        builder.Property(s => s.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
+        
         builder.ComplexProperty(s => s.Address, address =>
         {
             address.Property(a => a.Street)

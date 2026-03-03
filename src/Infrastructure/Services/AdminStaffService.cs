@@ -146,7 +146,24 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         adminStaff.Function     = dto.Function;
         adminStaff.DepartmentId = dto.DepartmentId;
 
-        await context.SaveChangesAsync(ct);
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            var entry = ex.Entries.Single();
+            var dbValues = await entry.GetDatabaseValuesAsync(ct);
+
+            if (dbValues is null)
+                throw new InvalidOperationException("The record was deleted by another user.");
+
+            throw new ConcurrencyConflictException(
+                "The record was modified by another user. Please review and retry.",
+                clientValues: entry.CurrentValues.ToObject(),
+                databaseValues: dbValues.ToObject()
+            );
+        }
         return (await GetByIdAsync(id, ct))!;
     }
 

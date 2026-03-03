@@ -45,6 +45,12 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
         builder.Property(c => c.UpdatedAt)
             .HasColumnName("UpdatedAt")
             .IsRequired();
+        
+        builder.Property(c => c.RowVersion)
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion()
+            .ValueGeneratedOnAddOrUpdate();
 
         builder.HasIndex(c => new { c.PatientId, c.DoctorId, c.ScheduledAt })
             .IsUnique()
@@ -52,6 +58,9 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
 
         builder.HasIndex(c => c.PatientId)
             .HasDatabaseName("IX_Consultations_PatientId");
+        
+        builder.HasIndex(c => new { c.DoctorId, c.ScheduledAt })
+            .HasDatabaseName("IX_Consultations_DoctorId_ScheduledAt");
 
         builder.HasIndex(c => c.DoctorId)
             .HasDatabaseName("IX_Consultations_DoctorId");
@@ -59,6 +68,10 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
         builder.HasIndex(c => c.ScheduledAt)
             .HasDatabaseName("IX_Consultations_ScheduledAt");
 
+        builder.HasIndex(c => new { c.DoctorId, c.ScheduledAt })
+            .HasFilter("\"Status\" = 'Scheduled'")
+            .HasDatabaseName("IX_Consultations_DoctorId_ScheduledAt_Scheduled");
+        
         builder.HasOne(c => c.Patient)
             .WithMany(p => p.Consultations)
             .HasForeignKey(c => c.PatientId)
