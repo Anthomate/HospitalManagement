@@ -11,4 +11,6 @@ public class Patient : BaseEntity
     public string Email { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string? Address { get; set; }
+    
+    public ICollection<Consultation> Consultations { get; set; } = new List<Consultation>();
 }
