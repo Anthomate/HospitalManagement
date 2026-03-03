@@ -8,7 +8,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class ConsultationsController(IConsultationService service) : ControllerBase
+public class ConsultationsController(IConsultationService service, ILogger<ConsultationsController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<ConsultationDto>>> GetAll(
@@ -90,6 +90,10 @@ public class ConsultationsController(IConsultationService service) : ControllerB
         [FromBody] CreateConsultationDto dto,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "POST /consultations — Patient: {PatientId}, Doctor: {DoctorId}, ScheduledAt: {ScheduledAt}",
+            dto.PatientId, dto.DoctorId, dto.ScheduledAt);
+
         var created = await service.CreateAsync(dto, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -100,6 +104,10 @@ public class ConsultationsController(IConsultationService service) : ControllerB
         [FromBody] ConsultationStatus newStatus,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "PATCH /consultations/{ConsultationId}/status — NewStatus: {Status}",
+            id, newStatus);
+
         var updated = await service.UpdateStatusAsync(id, newStatus, ct);
         return updated is null ? NotFound() : Ok(updated);
     }
@@ -107,6 +115,8 @@ public class ConsultationsController(IConsultationService service) : ControllerB
     [HttpPatch("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, CancellationToken ct)
     {
+        logger.LogWarning("PATCH /consultations/{ConsultationId}/cancel requested", id);
+
         await service.CancelAsync(id, ct);
         return NoContent();
     }

@@ -1,6 +1,7 @@
 using Application.AdminStaff.DTOs;
 using Application.AdminStaff.Interfaces;
 using Application.Common;
+using Application.Common.Exceptions;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -92,12 +93,13 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         var emailExists = await context.StaffMembers
             .AnyAsync(s => s.Email == dto.Email, ct);
         if (emailExists)
-            throw new InvalidOperationException($"Email '{dto.Email}' is already used.");
+            throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
         var deptExists = await context.Departments
             .AnyAsync(d => d.Id == dto.DepartmentId, ct);
+        
         if (!deptExists)
-            throw new InvalidOperationException($"Department '{dto.DepartmentId}' not found.");
+            throw new NotFoundException("Department", dto.DepartmentId);
 
         var adminStaff = new AdminStaff
         {
@@ -129,12 +131,12 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         var emailTaken = await context.StaffMembers
             .AnyAsync(s => s.Email == dto.Email && s.Id != id, ct);
         if (emailTaken)
-            throw new InvalidOperationException($"Email '{dto.Email}' is already used.");
+            throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
         var deptExists = await context.Departments
             .AnyAsync(d => d.Id == dto.DepartmentId, ct);
         if (!deptExists)
-            throw new InvalidOperationException($"Department '{dto.DepartmentId}' not found.");
+            throw new NotFoundException("Department", dto.DepartmentId);
 
         adminStaff.FirstName    = dto.FirstName;
         adminStaff.LastName     = dto.LastName;

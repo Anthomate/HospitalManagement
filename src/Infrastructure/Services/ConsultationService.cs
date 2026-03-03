@@ -1,4 +1,5 @@
 using Application.Common;
+using Application.Common.Exceptions;
 using Application.Consultations.DTOs;
 using Application.Consultations.Interfaces;
 using Domain.Entities;
@@ -132,11 +133,11 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
     {
         var patientExists = await context.Patients.AnyAsync(p => p.Id == dto.PatientId, ct);
         if (!patientExists)
-            throw new InvalidOperationException($"Patient '{dto.PatientId}' not found.");
+            throw new NotFoundException("Patient", dto.PatientId);
 
         var doctorExists = await context.Doctors.AnyAsync(d => d.Id == dto.DoctorId, ct);
         if (!doctorExists)
-            throw new InvalidOperationException($"Doctor '{dto.DoctorId}' not found.");
+            throw new NotFoundException("Doctor", dto.DoctorId);
 
         var slotTaken = await context.Consultations.AnyAsync(
             c => c.PatientId == dto.PatientId
@@ -144,7 +145,7 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
               && c.ScheduledAt == dto.ScheduledAt, ct);
 
         if (slotTaken)
-            throw new InvalidOperationException(
+            throw new BusinessRuleException(
                 "This patient already has an appointment with this doctor at the same time.");
 
         var consultation = new Consultation
@@ -214,7 +215,8 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         CancellationToken ct = default)
     {
         var consultation = await context.Consultations.FindAsync([id], ct);
-        if (consultation is null) return null;
+        if (consultation is null)
+            throw new NotFoundException("Consultation", id);
 
         var allowed = (consultation.Status, newStatus) switch
         {
@@ -226,7 +228,7 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         };
 
         if (!allowed)
-            throw new InvalidOperationException(
+            throw new BusinessRuleException(
                 $"Transition from '{consultation.Status}' to '{newStatus}' is not allowed.");
 
         consultation.Status = newStatus;
@@ -265,10 +267,9 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         {
             var exists = await context.Consultations.AnyAsync(c => c.Id == id, ct);
             if (!exists)
-                throw new InvalidOperationException($"Consultation '{id}' not found.");
+                throw new NotFoundException("Consultation", id);
 
-            throw new InvalidOperationException(
-                "Only scheduled consultations can be cancelled.");
+            throw new BusinessRuleException("Only scheduled consultations can be cancelled.");
         }
 
         return true;

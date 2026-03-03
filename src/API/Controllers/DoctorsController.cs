@@ -7,7 +7,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DoctorsController(IDoctorService service) : ControllerBase
+public class DoctorsController(IDoctorService service, ILogger<DoctorsController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<DoctorDto>>> GetAll(
@@ -44,6 +44,10 @@ public class DoctorsController(IDoctorService service) : ControllerBase
         [FromBody] CreateDoctorDto dto,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "POST /doctors — LicenseNumber: {LicenseNumber}",
+            dto.LicenseNumber);
+
         var created = await service.CreateAsync(dto, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -61,6 +65,8 @@ public class DoctorsController(IDoctorService service) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
+        logger.LogWarning("DELETE /doctors/{DoctorId} requested", id);
+
         var deleted = await service.DeleteAsync(id, ct);
         return deleted ? NoContent() : NotFound();
     }

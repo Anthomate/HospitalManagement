@@ -1,14 +1,16 @@
 using Application.Common;
+using Application.Common.Exceptions;
 using Application.Patients.DTOs;
 using Application.Patients.Interfaces;
 using Domain.Entities;
 using Domain.Enums;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class PatientService(HospitalDbContext context) : IPatientService
+public class PatientService(HospitalDbContext context, ILogger<PatientService> logger) : IPatientService
 {
     public async Task<PagedResult<PatientDto>> GetAllAsync(
         PaginationParams pagination,
@@ -60,12 +62,19 @@ public class PatientService(HospitalDbContext context) : IPatientService
         CreatePatientDto dto,
         CancellationToken ct = default)
     {
-        var exists = await context.Patients.AnyAsync(
-            p => p.RecordNumber == dto.RecordNumber || p.Email == dto.Email, ct);
+        logger.LogInformation(
+            "Creating patient {FirstName} {LastName} with RecordNumber {RecordNumber}",
+            dto.FirstName, dto.LastName, dto.RecordNumber);
 
-        if (exists)
-            throw new InvalidOperationException(
-                $"A patient with RecordNumber '{dto.RecordNumber}' or Email '{dto.Email}' already exists.");
+        var recordExists = await context.Patients
+            .AnyAsync(p => p.RecordNumber == dto.RecordNumber, ct);
+        if (recordExists)
+            throw new AlreadyExistsException("Patient", "RecordNumber", dto.RecordNumber);
+
+        var emailExists = await context.Patients
+            .AnyAsync(p => p.Email == dto.Email, ct);
+        if (emailExists)
+            throw new AlreadyExistsException("Patient", "Email", dto.Email);
 
         var patient = new Patient
         {
@@ -81,6 +90,7 @@ public class PatientService(HospitalDbContext context) : IPatientService
         context.Patients.Add(patient);
         await context.SaveChangesAsync(ct);
 
+        logger.LogInformation("Patient {Id} created successfully", patient.Id);
         return ToDto(patient);
     }
 
@@ -92,12 +102,10 @@ public class PatientService(HospitalDbContext context) : IPatientService
         var patient = await context.Patients.FindAsync([id], ct);
         if (patient is null) return null;
 
-        var emailTaken = await context.Patients.AnyAsync(
-            p => p.Email == dto.Email && p.Id != id, ct);
-
+        var emailTaken = await context.Patients
+            .AnyAsync(p => p.Email == dto.Email && p.Id != id, ct);
         if (emailTaken)
-            throw new InvalidOperationException(
-                $"Email '{dto.Email}' is already used by another patient.");
+            throw new AlreadyExistsException("Patient", "Email", dto.Email);
 
         patient.FirstName = dto.FirstName;
         patient.LastName  = dto.LastName;
@@ -116,16 +124,19 @@ public class PatientService(HospitalDbContext context) : IPatientService
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
-                throw new InvalidOperationException("The record was deleted by another user.");
+                throw new NotFoundException("Patient", id);
 
             throw new ConcurrencyConflictException(
-                "The record was modified by another user. Please review and retry.",
+                "The patient was modified by another user. Please review and retry.",
                 clientValues: entry.CurrentValues.ToObject(),
                 databaseValues: dbValues.ToObject()
             );
         }
+
+        logger.LogInformation("Patient {Id} updated successfully", id);
         return ToDto(patient);
     }
+
 
     public async Task<PagedResult<PatientDto>> GetAllAlphabeticalAsync(
         PaginationParams pagination,
@@ -196,18 +207,21 @@ public class PatientService(HospitalDbContext context) : IPatientService
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var hasActiveConsultations = await context.Consultations.AnyAsync(
-            c => c.PatientId == id &&
-                 c.Status != ConsultationStatus.Cancelled, ct);
+        logger.LogWarning("Attempting to delete patient {PatientId}", id);
 
+        var hasActiveConsultations = await context.Consultations.AnyAsync(
+            c => c.PatientId == id && c.Status != ConsultationStatus.Cancelled, ct);
         if (hasActiveConsultations)
-            throw new InvalidOperationException(
+            throw new BusinessRuleException(
                 "Cannot delete a patient with active or completed consultations. " +
                 "Cancel all consultations before deleting.");
 
         var deleted = await context.Patients
             .Where(p => p.Id == id)
             .ExecuteDeleteAsync(ct);
+
+        if (deleted > 0)
+            logger.LogWarning("Patient {PatientId} deleted", id);
 
         return deleted > 0;
     }

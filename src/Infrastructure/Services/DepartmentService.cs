@@ -1,13 +1,15 @@
 using Application.Common;
+using Application.Common.Exceptions;
 using Application.Departments.DTOs;
 using Application.Departments.Interfaces;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class DepartmentService(HospitalDbContext context) : IDepartmentService
+public class DepartmentService(HospitalDbContext context, ILogger<DepartmentService> logger) : IDepartmentService
 {
     private static DepartmentDto ToDto(Domain.Entities.Department d, int doctorCount) => new(
         d.Id,
@@ -76,25 +78,41 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
         CreateDepartmentDto dto,
         CancellationToken ct = default)
     {
+        logger.LogInformation("Creating department {Name}", dto.Name);
+
         var nameExists = await context.Departments
             .AnyAsync(d => d.Name == dto.Name, ct);
-
         if (nameExists)
-            throw new InvalidOperationException(
-                $"A department named '{dto.Name}' already exists.");
+            throw new AlreadyExistsException("Department", "Name", dto.Name);
 
-        var department = new Department
-        {
-            Name     = dto.Name,
-            Location = dto.Location
-        };
-
+        var department = new Department { Name = dto.Name, Location = dto.Location };
         context.Departments.Add(department);
         await context.SaveChangesAsync(ct);
 
+        logger.LogInformation("Department {Id} created successfully", department.Id);
         return (await GetByIdAsync(department.Id, ct))!;
     }
 
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        logger.LogWarning("Attempting to delete department {DepartmentId}", id);
+
+        var hasDoctors = await context.Doctors
+            .AnyAsync(d => d.DepartmentId == id, ct);
+        if (hasDoctors)
+            throw new BusinessRuleException(
+                "Cannot delete a department that still has doctors. Reassign them first.");
+
+        var deleted = await context.Departments
+            .Where(d => d.Id == id)
+            .ExecuteDeleteAsync(ct);
+
+        if (deleted > 0)
+            logger.LogWarning("Department {DepartmentId} deleted", id);
+
+        return deleted > 0;
+    }
+    
     public async Task<DepartmentDto?> UpdateAsync(
         Guid id,
         UpdateDepartmentDto dto,
@@ -107,8 +125,7 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
             .AnyAsync(d => d.Name == dto.Name && d.Id != id, ct);
 
         if (nameExists)
-            throw new InvalidOperationException(
-                $"A department named '{dto.Name}' already exists.");
+            throw new AlreadyExistsException("Department", "Name", dto.Name);
 
         if (dto.MedicalDirectorId.HasValue)
         {
@@ -116,7 +133,7 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
                 d => d.Id == dto.MedicalDirectorId && d.DepartmentId == id, ct);
 
             if (!doctorInDept)
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "The medical director must be a doctor belonging to this department.");
         }
 
@@ -145,22 +162,6 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
         return (await GetByIdAsync(id, ct))!;
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
-    {
-        var hasDoctors = await context.Doctors
-            .AnyAsync(d => d.DepartmentId == id, ct);
-
-        if (hasDoctors)
-            throw new InvalidOperationException(
-                "Cannot delete a department that still has doctors. Reassign them first.");
-
-        var deleted = await context.Departments
-            .Where(d => d.Id == id)
-            .ExecuteDeleteAsync(ct);
-
-        return deleted > 0;
-    }
-
     public async Task<DepartmentDto?> AssignDirectorAsync(
         Guid departmentId,
         Guid doctorId,
@@ -171,13 +172,16 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
 
         var doctorInDept = await context.Doctors.AnyAsync(
             d => d.Id == doctorId && d.DepartmentId == departmentId, ct);
-
         if (!doctorInDept)
-            throw new InvalidOperationException(
+            throw new BusinessRuleException(
                 "The medical director must be a doctor belonging to this department.");
 
         department.MedicalDirectorId = doctorId;
         await context.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "Doctor {DoctorId} assigned as director of department {DepartmentId}",
+            doctorId, departmentId);
 
         return (await GetByIdAsync(departmentId, ct))!;
     }
@@ -191,6 +195,9 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
 
         department.MedicalDirectorId = null;
         await context.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "Medical director removed from department {DepartmentId}", departmentId);
 
         return (await GetByIdAsync(departmentId, ct))!;
     }
@@ -248,11 +255,11 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
         if (parentId.HasValue)
         {
             if (parentId == departmentId)
-                throw new InvalidOperationException("A department cannot be its own parent.");
+                throw new BusinessRuleException("A department cannot be its own parent.");
 
             var wouldCycle = await CreatesCycleAsync(departmentId, parentId.Value, ct);
             if (wouldCycle)
-                throw new InvalidOperationException(
+                throw new BusinessRuleException(
                     "This assignment would create a circular hierarchy.");
         }
 

@@ -6,7 +6,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DashboardController(IDashboardService service) : ControllerBase
+public class DashboardController(IDashboardService service, ILogger<DashboardController> logger) : ControllerBase
 {
     [HttpGet("patients/{patientId:guid}/record")]
     public async Task<ActionResult<PatientRecordDto>> GetPatientRecord(
@@ -14,7 +14,7 @@ public class DashboardController(IDashboardService service) : ControllerBase
         CancellationToken ct)
     {
         var result = await service.GetPatientRecordAsync(patientId, ct);
-        return result is null ? NotFound() : Ok(result);
+        return Ok(result);
     }
 
     [HttpGet("doctors/{doctorId:guid}/planning")]
@@ -23,7 +23,7 @@ public class DashboardController(IDashboardService service) : ControllerBase
         CancellationToken ct)
     {
         var result = await service.GetDoctorPlanningAsync(doctorId, ct);
-        return result is null ? NotFound() : Ok(result);
+        return Ok(result);
     }
 
     [HttpGet("departments/stats")]

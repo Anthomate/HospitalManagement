@@ -7,7 +7,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PatientsController(IPatientService service) : ControllerBase
+public class PatientsController(IPatientService service, ILogger<PatientsController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<PatientDto>>> GetAll(
@@ -18,6 +18,22 @@ public class PatientsController(IPatientService service) : ControllerBase
         var result = await service.GetAllAlphabeticalAsync(
             new PaginationParams { Page = page, PageSize = pageSize }, ct);
         return Ok(result);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<PatientDto>> GetById(Guid id, CancellationToken ct)
+    {
+        var patient = await service.GetByIdAsync(id, ct);
+        return patient is null ? NotFound() : Ok(patient);
+    }
+
+    [HttpGet("record/{recordNumber}")]
+    public async Task<ActionResult<PatientDto>> GetByRecordNumber(
+        string recordNumber,
+        CancellationToken ct)
+    {
+        var patient = await service.GetByRecordNumberAsync(recordNumber, ct);
+        return patient is null ? NotFound() : Ok(patient);
     }
 
     [HttpGet("search")]
@@ -32,25 +48,15 @@ public class PatientsController(IPatientService service) : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<PatientDto>> GetById(Guid id, CancellationToken ct)
-    {
-        var patient = await service.GetByIdAsync(id, ct);
-        return patient is null ? NotFound() : Ok(patient);
-    }
-
-    [HttpGet("record/{recordNumber}")]
-    public async Task<ActionResult<PatientDto>> GetByRecordNumber(string recordNumber, CancellationToken ct)
-    {
-        var patient = await service.GetByRecordNumberAsync(recordNumber, ct);
-        return patient is null ? NotFound() : Ok(patient);
-    }
-
     [HttpPost]
     public async Task<ActionResult<PatientDto>> Create(
         [FromBody] CreatePatientDto dto,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "POST /patients — RecordNumber: {RecordNumber}",
+            dto.RecordNumber);
+
         var created = await service.CreateAsync(dto, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -68,6 +74,8 @@ public class PatientsController(IPatientService service) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
+        logger.LogWarning("DELETE /patients/{PatientId} requested", id);
+
         var deleted = await service.DeleteAsync(id, ct);
         return deleted ? NoContent() : NotFound();
     }

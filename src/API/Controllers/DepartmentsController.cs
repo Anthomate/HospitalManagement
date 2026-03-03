@@ -7,7 +7,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DepartmentsController(IDepartmentService service) : ControllerBase
+public class DepartmentsController(IDepartmentService service, ILogger<DepartmentsController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<DepartmentDto>>> GetAll(
@@ -27,11 +27,20 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpGet("tree")]
+    public async Task<ActionResult<IReadOnlyList<DepartmentTreeDto>>> GetTree(CancellationToken ct)
+    {
+        var result = await service.GetDepartmentTreeAsync(ct);
+        return Ok(result);
+    }
+
     [HttpPost]
     public async Task<ActionResult<DepartmentDto>> Create(
         [FromBody] CreateDepartmentDto dto,
         CancellationToken ct)
     {
+        logger.LogInformation("POST /departments — Name: {Name}", dto.Name);
+
         var created = await service.CreateAsync(dto, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -49,6 +58,8 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
+        logger.LogWarning("DELETE /departments/{DepartmentId} requested", id);
+
         var deleted = await service.DeleteAsync(id, ct);
         return deleted ? NoContent() : NotFound();
     }
@@ -59,6 +70,10 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
         Guid doctorId,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "PATCH /departments/{DepartmentId}/director — Doctor: {DoctorId}",
+            id, doctorId);
+
         var result = await service.AssignDirectorAsync(id, doctorId, ct);
         return result is null ? NotFound() : Ok(result);
     }
@@ -66,15 +81,11 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
     [HttpDelete("{id:guid}/director")]
     public async Task<ActionResult<DepartmentDto>> RemoveDirector(Guid id, CancellationToken ct)
     {
+        logger.LogWarning(
+            "DELETE /departments/{DepartmentId}/director requested", id);
+
         var result = await service.RemoveDirectorAsync(id, ct);
         return result is null ? NotFound() : Ok(result);
-    }
-    
-    [HttpGet("tree")]
-    public async Task<ActionResult<IReadOnlyList<DepartmentTreeDto>>> GetTree(CancellationToken ct)
-    {
-        var result = await service.GetDepartmentTreeAsync(ct);
-        return Ok(result);
     }
 
     [HttpPatch("{id:guid}/parent")]
@@ -83,6 +94,10 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
         [FromBody] Guid? parentId,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "PATCH /departments/{DepartmentId}/parent — Parent: {ParentId}",
+            id, parentId);
+
         var result = await service.SetParentAsync(id, parentId, ct);
         return result is null ? NotFound() : Ok(result);
     }

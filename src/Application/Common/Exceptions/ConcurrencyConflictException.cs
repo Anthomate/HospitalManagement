@@ -1,4 +1,4 @@
-namespace Application.Common;
+namespace Application.Common.Exceptions;
 
 public class ConcurrencyConflictException : Exception
 {

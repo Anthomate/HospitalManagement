@@ -7,7 +7,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class AdminStaffsController(IAdminStaffService service) : ControllerBase
+public class AdminStaffsController(IAdminStaffService service, ILogger<AdminStaffsController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<AdminStaffDto>>> GetAll(
@@ -44,6 +44,10 @@ public class AdminStaffsController(IAdminStaffService service) : ControllerBase
         [FromBody] CreateAdminStaffDto dto,
         CancellationToken ct)
     {
+        logger.LogInformation(
+            "POST /adminstaff — Function: {Function}, Department: {DepartmentId}",
+            dto.Function, dto.DepartmentId);
+
         var created = await service.CreateAsync(dto, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
@@ -61,6 +65,8 @@ public class AdminStaffsController(IAdminStaffService service) : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
+        logger.LogWarning("DELETE /adminstaff/{AdminStaffId} requested", id);
+
         var deleted = await service.DeleteAsync(id, ct);
         return deleted ? NoContent() : NotFound();
     }
