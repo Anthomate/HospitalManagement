@@ -26,6 +26,9 @@ public class DepartmentConfiguration : IEntityTypeConfiguration<Department>
             .HasMaxLength(200)
             .IsRequired();
         
+        builder.Property(d => d.MedicalDirectorId)
+            .HasColumnName("MedicalDirectorId");
+        
         builder.Property(d => d.CreatedAt)
             .HasColumnName("CreatedAt")
             .IsRequired();
@@ -37,5 +40,11 @@ public class DepartmentConfiguration : IEntityTypeConfiguration<Department>
         builder.HasIndex(d => d.Name)
             .IsUnique()
             .HasDatabaseName("ix_departments_name");
+        
+        builder.HasOne(d => d.MedicalDirector)
+            .WithMany()
+            .HasForeignKey(d => d.MedicalDirectorId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .HasConstraintName("FK_Departments_MedicalDirector");
     }
 }
