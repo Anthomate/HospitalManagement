@@ -48,3 +48,15 @@ On ajoute des index sur les colonnes filtrées fréquemment via HasIndex() dans 
 ### Comment éviter de charger des données inutiles ?
 
 On utilise .AsNoTracking() pour les lectures et .Select() pour ne projeter que les colonnes qu'on veut, plutôt que de charger toute l'entité.
+
+### Quelle stratégie de chargement utiliser ?
+
+La projection via .Select() est la meilleure stratégie pour les vues en lecture seule car elle laisse EF Core générer un SQL ciblé avec uniquement les colonnes nécessaires, sans charger toute une entité en mémoire.
+
+### Comment éviter le problème N+1 ?
+
+Ne jamais accéder à une navigation property dans une boucle sur des entités déjà chargées. Il faut tout faire dans un seul .Select() pour qu'EF Core génère un unique SQL avec les JOINs nécessaires.
+
+### Comment structurer les données pour la vue ?
+
+Créer un DTO dédié par vue qui reflète ce qu'affiche l'écran plutôt que de retourner des entités génériques.
