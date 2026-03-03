@@ -40,7 +40,7 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
                 d.MedicalDirector != null
                     ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
                     : null,
-                d.Doctors.Count,
+                d.StaffMembers.OfType<Doctor>().Count(),
                 d.CreatedAt
             ))
             .ToListAsync(ct);
@@ -66,7 +66,7 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
                 d.MedicalDirector != null
                     ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
                     : null,
-                d.Doctors.Count,
+                d.StaffMembers.OfType<Doctor>().Count(),
                 d.CreatedAt
             ))
             .FirstOrDefaultAsync(ct);
@@ -176,5 +176,91 @@ public class DepartmentService(HospitalDbContext context) : IDepartmentService
         await context.SaveChangesAsync(ct);
 
         return (await GetByIdAsync(departmentId, ct))!;
+    }
+    
+    public async Task<IReadOnlyList<DepartmentTreeDto>> GetDepartmentTreeAsync(
+        CancellationToken ct = default)
+    {
+        var all = await context.Departments
+            .AsNoTracking()
+            .OrderBy(d => d.Name)
+            .Select(d => new
+            {
+                d.Id,
+                d.Name,
+                d.Location,
+                d.ParentDepartmentId,
+                MedicalDirectorName = d.MedicalDirector != null
+                    ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
+                    : null,
+                DoctorCount = d.StaffMembers.OfType<Doctor>().Count(),
+            })
+            .ToListAsync(ct);
+
+        DepartmentTreeDto BuildNode(Guid? parentId) =>
+            throw new NotImplementedException();
+
+        var lookup = all.ToLookup(d => d.ParentDepartmentId);
+
+        DepartmentTreeDto ToTree(Guid id)
+        {
+            var d = all.First(x => x.Id == id);
+            return new DepartmentTreeDto(
+                d.Id,
+                d.Name,
+                d.Location,
+                d.MedicalDirectorName,
+                d.DoctorCount,
+                lookup[d.Id].Select(child => ToTree(child.Id)).ToList()
+            );
+        }
+
+        return lookup[null]
+            .Select(d => ToTree(d.Id))
+            .ToList();
+    }
+
+    public async Task<DepartmentDto?> SetParentAsync(
+        Guid departmentId,
+        Guid? parentId,
+        CancellationToken ct = default)
+    {
+        var department = await context.Departments.FindAsync([departmentId], ct);
+        if (department is null) return null;
+
+        if (parentId.HasValue)
+        {
+            if (parentId == departmentId)
+                throw new InvalidOperationException("A department cannot be its own parent.");
+
+            var wouldCycle = await CreatesCycleAsync(departmentId, parentId.Value, ct);
+            if (wouldCycle)
+                throw new InvalidOperationException(
+                    "This assignment would create a circular hierarchy.");
+        }
+
+        department.ParentDepartmentId = parentId;
+        await context.SaveChangesAsync(ct);
+        return (await GetByIdAsync(departmentId, ct))!;
+    }
+
+    private async Task<bool> CreatesCycleAsync(
+        Guid departmentId,
+        Guid candidateParentId,
+        CancellationToken ct)
+    {
+        var currentId = (Guid?)candidateParentId;
+
+        while (currentId.HasValue)
+        {
+            if (currentId == departmentId) return true;
+
+            currentId = await context.Departments
+                .Where(d => d.Id == currentId)
+                .Select(d => d.ParentDepartmentId)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        return false;
     }
 }

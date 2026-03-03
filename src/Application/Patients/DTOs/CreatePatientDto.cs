@@ -1,3 +1,5 @@
+using Domain.ValueObjects;
+
 namespace Application.Patients.DTOs;
 
 public record CreatePatientDto(
@@ -7,5 +9,5 @@ public record CreatePatientDto(
     string RecordNumber,
     string Email,
     string? Phone,
-    string? Address
+    Address Address
 );

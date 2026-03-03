@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(HospitalDbContext))]
-    partial class HospitalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260303130229_AddComplexTypeTPHAndHierarchy")]
+    partial class AddComplexTypeTPHAndHierarchy
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -242,10 +245,6 @@ namespace Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("FirstName");
 
-                    b.Property<DateOnly>("HireDate")
-                        .HasColumnType("date")
-                        .HasColumnName("HireDate");
-
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -256,10 +255,6 @@ namespace Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("Phone");
-
-                    b.Property<decimal>("Salary")
-                        .HasColumnType("numeric(10,2)")
-                        .HasColumnName("Salary");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -310,16 +305,16 @@ namespace Infrastructure.Persistence.Migrations
                 {
                     b.HasBaseType("Domain.Entities.StaffMember");
 
-                    b.Property<string>("Function")
+                    b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
-                        .HasColumnName("Function");
+                        .HasColumnName("Role");
 
                     b.HasDiscriminator().HasValue("AdminStaff");
                 });
 
-            modelBuilder.Entity("Domain.Entities.MedicalStaff", b =>
+            modelBuilder.Entity("Domain.Entities.Doctor", b =>
                 {
                     b.HasBaseType("Domain.Entities.StaffMember");
 
@@ -329,43 +324,17 @@ namespace Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("LicenseNumber");
 
-                    b.HasIndex("LicenseNumber")
-                        .IsUnique()
-                        .HasDatabaseName("IX_StaffMembers_LicenseNumber");
-
-                    b.HasDiscriminator().HasValue("MedicalStaff");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Doctor", b =>
-                {
-                    b.HasBaseType("Domain.Entities.MedicalStaff");
-
                     b.Property<string>("Specialty")
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)")
                         .HasColumnName("Specialty");
 
+                    b.HasIndex("LicenseNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Doctors_LicenseNumber");
+
                     b.HasDiscriminator().HasValue("Doctor");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Nurse", b =>
-                {
-                    b.HasBaseType("Domain.Entities.MedicalStaff");
-
-                    b.Property<string>("Grade")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("Grade");
-
-                    b.Property<string>("Service")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("Service");
-
-                    b.HasDiscriminator().HasValue("Nurse");
                 });
 
             modelBuilder.Entity("Domain.Entities.Consultation", b =>

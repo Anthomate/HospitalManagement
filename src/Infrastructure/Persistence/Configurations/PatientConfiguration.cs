@@ -45,9 +45,28 @@ public class PatientConfiguration : IEntityTypeConfiguration<Patient>
             .HasColumnName("Phone")
             .HasMaxLength(20);
 
-        builder.Property(p => p.Address)
-            .HasColumnName("Address")
-            .HasMaxLength(500);
+        builder.ComplexProperty(p => p.Address, address =>
+        {
+            address.Property(a => a.Street)
+                .HasColumnName("AddressStreet")
+                .HasMaxLength(200)
+                .IsRequired(false);
+
+            address.Property(a => a.City)
+                .HasColumnName("AddressCity")
+                .HasMaxLength(100)
+                .IsRequired(false);
+
+            address.Property(a => a.ZipCode)
+                .HasColumnName("AddressZipCode")
+                .HasMaxLength(10)
+                .IsRequired(false);
+
+            address.Property(a => a.Country)
+                .HasColumnName("AddressCountry")
+                .HasMaxLength(100)
+                .IsRequired(false);
+        });
 
         builder.Property(p => p.CreatedAt)
             .HasColumnName("CreatedAt")

@@ -1,5 +1,6 @@
 using Application.Dashboard.DTOs;
 using Application.Dashboard.Interfaces;
+using Domain.Entities;
 using Domain.Enums;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -84,13 +85,21 @@ public class DashboardService(HospitalDbContext context) : IDashboardService
                     ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
                     : null,
 
-                d.Doctors.Count,
-                d.Doctors.SelectMany(doc => doc.Consultations).Count(),
-                d.Doctors.SelectMany(doc => doc.Consultations)
+                d.StaffMembers.OfType<Doctor>().Count(),
+                d.StaffMembers.OfType<Doctor>()
+                    .SelectMany(doc => doc.Consultations)
+                    .Count(),
+
+                d.StaffMembers.OfType<Doctor>()
+                    .SelectMany(doc => doc.Consultations)
                     .Count(c => c.Status == ConsultationStatus.Scheduled),
-                d.Doctors.SelectMany(doc => doc.Consultations)
+
+                d.StaffMembers.OfType<Doctor>()
+                    .SelectMany(doc => doc.Consultations)
                     .Count(c => c.Status == ConsultationStatus.Completed),
-                d.Doctors.SelectMany(doc => doc.Consultations)
+
+                d.StaffMembers.OfType<Doctor>()
+                    .SelectMany(doc => doc.Consultations)
                     .Count(c => c.Status == ConsultationStatus.Cancelled)
             ))
             .ToListAsync(ct);

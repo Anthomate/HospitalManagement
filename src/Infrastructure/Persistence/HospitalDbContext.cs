@@ -10,7 +10,11 @@ public class HospitalDbContext : DbContext
     
     public DbSet<Patient> Patients { get; set; }
     public DbSet<Department> Departments { get; set; }
+    public DbSet<StaffMember> StaffMembers { get; set; }
+    public DbSet<MedicalStaff> MedicalStaffs { get; set; }
     public DbSet<Doctor> Doctors { get; set; }
+    public DbSet<Nurse> Nurses { get; set; }
+    public DbSet<AdminStaff> AdminStaffs { get; set; }
     public DbSet<Consultation> Consultations { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

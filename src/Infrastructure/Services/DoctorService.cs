@@ -23,8 +23,8 @@ public class DoctorService(HospitalDbContext context) : IDoctorService
             .Skip((pagination.Page - 1) * pagination.PageSize)
             .Take(pagination.PageSize)
             .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName,
-                d.Specialty, d.LicenseNumber,
+                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
+                d.HireDate, d.Salary,d.Specialty, d.LicenseNumber,
                 d.DepartmentId, d.Department.Name))
             .ToListAsync(ct);
 
@@ -53,8 +53,8 @@ public class DoctorService(HospitalDbContext context) : IDoctorService
             .Skip((pagination.Page - 1) * pagination.PageSize)
             .Take(pagination.PageSize)
             .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName,
-                d.Specialty, d.LicenseNumber,
+                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
+                d.HireDate, d.Salary,d.Specialty, d.LicenseNumber,
                 d.DepartmentId, d.Department.Name))
             .ToListAsync(ct);
 
@@ -73,14 +73,19 @@ public class DoctorService(HospitalDbContext context) : IDoctorService
             .AsNoTracking()
             .Where(d => d.Id == id)
             .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName,
-                d.Specialty, d.LicenseNumber,
+                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
+                d.HireDate, d.Salary,d.Specialty, d.LicenseNumber,
                 d.DepartmentId, d.Department.Name))
             .FirstOrDefaultAsync(ct);
     }
 
     public async Task<DoctorDto> CreateAsync(CreateDoctorDto dto, CancellationToken ct = default)
     {
+        var emailExists = await context.StaffMembers
+            .AnyAsync(s => s.Email == dto.Email, ct);
+
+        if (emailExists)
+            throw new InvalidOperationException($"Email '{dto.Email}' is already used.");
         var deptExists = await context.Departments.AnyAsync(d => d.Id == dto.DepartmentId, ct);
         if (!deptExists)
             throw new InvalidOperationException($"Department '{dto.DepartmentId}' not found.");
@@ -113,12 +118,18 @@ public class DoctorService(HospitalDbContext context) : IDoctorService
         var doctor = await context.Doctors.FindAsync([id], ct);
         if (doctor is null) return null;
 
+        var emailTaken = await context.StaffMembers
+            .AnyAsync(s => s.Email == dto.Email && s.Id != id, ct);
+        
         var deptExists = await context.Departments.AnyAsync(d => d.Id == dto.DepartmentId, ct);
         if (!deptExists)
             throw new InvalidOperationException($"Department '{dto.DepartmentId}' not found.");
 
         doctor.FirstName    = dto.FirstName;
         doctor.LastName     = dto.LastName;
+        doctor.Email        = dto.Email;
+        doctor.Phone        = dto.Phone;
+        doctor.Address      = dto.Address;
         doctor.Specialty    = dto.Specialty;
         doctor.DepartmentId = dto.DepartmentId;
 

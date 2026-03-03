@@ -1,7 +1,9 @@
+using Application.AdminStaff.Interfaces;
 using Application.Consultations.Interfaces;
 using Application.Dashboard.Interfaces;
 using Application.Departments.Interfaces;
 using Application.Doctors.Interfaces;
+using Application.Nurses.Interfaces;
 using Application.Patients.Interfaces;
 using Infrastructure.Persistence;
 using Infrastructure.Services;
@@ -25,6 +27,8 @@ public static class DependencyInjection
         services.AddScoped<IConsultationService, ConsultationService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IDepartmentService, DepartmentService>();
+        services.AddScoped<INurseService, NurseService>();
+        services.AddScoped<IAdminStaffService, AdminStaffService>();
         
         return services;
     }

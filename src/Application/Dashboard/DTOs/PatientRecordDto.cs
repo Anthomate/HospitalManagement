@@ -1,3 +1,5 @@
+using Domain.ValueObjects;
+
 namespace Application.Dashboard.DTOs;
 
 public record PatientRecordDto(
@@ -7,6 +9,6 @@ public record PatientRecordDto(
     string RecordNumber,
     string Email,
     string? Phone,
-    string? Address,
+    Address Address,
     IReadOnlyList<ConsultationSummaryDto> Consultations
 );

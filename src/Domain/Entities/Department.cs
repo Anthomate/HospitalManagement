@@ -8,7 +8,11 @@ public class Department : BaseEntity
     public string Location { get; set; } = string.Empty;
     
     public Guid? MedicalDirectorId { get; set; }
-    public Doctor? MedicalDirector { get; set; }
     
-    public ICollection<Doctor> Doctors { get; set; } = new List<Doctor>();
+    public Guid? ParentDepartmentId { get; set; }
+    public Department? ParentDepartment { get; set; }
+    public ICollection<Department> SubDepartments { get; set; } = [];
+    
+    public Doctor? MedicalDirector { get; set; }
+    public ICollection<StaffMember> StaffMembers { get; set; } = new List<StaffMember>();
 }

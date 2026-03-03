@@ -1,8 +1,8 @@
 using Domain.ValueObjects;
 
-namespace Application.Doctors.DTOs;
+namespace Application.AdminStaff.DTOs;
 
-public record DoctorDto(
+public record AdminStaffDto(
     Guid Id,
     string FirstName,
     string LastName,
@@ -10,9 +10,8 @@ public record DoctorDto(
     string? Phone,
     Address Address,
     DateOnly HireDate,
-    decimal Salary,  
-    string Specialty,
-    string LicenseNumber,
+    decimal Salary,
+    string Function,
     Guid DepartmentId,
     string DepartmentName
 );

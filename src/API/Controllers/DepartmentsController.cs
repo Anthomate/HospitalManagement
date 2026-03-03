@@ -69,4 +69,21 @@ public class DepartmentsController(IDepartmentService service) : ControllerBase
         var result = await service.RemoveDirectorAsync(id, ct);
         return result is null ? NotFound() : Ok(result);
     }
+    
+    [HttpGet("tree")]
+    public async Task<ActionResult<IReadOnlyList<DepartmentTreeDto>>> GetTree(CancellationToken ct)
+    {
+        var result = await service.GetDepartmentTreeAsync(ct);
+        return Ok(result);
+    }
+
+    [HttpPatch("{id:guid}/parent")]
+    public async Task<ActionResult<DepartmentDto>> SetParent(
+        Guid id,
+        [FromBody] Guid? parentId,
+        CancellationToken ct)
+    {
+        var result = await service.SetParentAsync(id, parentId, ct);
+        return result is null ? NotFound() : Ok(result);
+    }
 }

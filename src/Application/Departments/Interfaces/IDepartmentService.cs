@@ -12,4 +12,6 @@ public interface IDepartmentService
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<DepartmentDto?> AssignDirectorAsync(Guid departmentId, Guid doctorId, CancellationToken ct = default);
     Task<DepartmentDto?> RemoveDirectorAsync(Guid departmentId, CancellationToken ct = default);
+    Task<IReadOnlyList<DepartmentTreeDto>> GetDepartmentTreeAsync(CancellationToken ct = default);
+    Task<DepartmentDto?> SetParentAsync(Guid departmentId, Guid? parentId, CancellationToken ct = default);
 }

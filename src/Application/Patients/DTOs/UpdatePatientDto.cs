@@ -1,3 +1,5 @@
+using Domain.ValueObjects;
+
 namespace Application.Patients.DTOs;
 
 public record UpdatePatientDto(
@@ -6,5 +8,5 @@ public record UpdatePatientDto(
     DateOnly BirthDate,
     string Email,
     string? Phone,
-    string? Address
+    Address Address
 );
