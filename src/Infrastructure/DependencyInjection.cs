@@ -1,4 +1,8 @@
+using Application.Consultations.Interfaces;
+using Application.Doctors.Interfaces;
+using Application.Patients.Interfaces;
 using Infrastructure.Persistence;
+using Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +17,10 @@ public static class DependencyInjection
             configuration.GetConnectionString("DefaultConnection"),
             npgsql => npgsql.MigrationsAssembly("Infrastructure"))
         );
+        
+        services.AddScoped<IPatientService, PatientService>();
+        services.AddScoped<IDoctorService, DoctorService>();
+        services.AddScoped<IConsultationService, ConsultationService>();
         
         return services;
     }

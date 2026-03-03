@@ -36,3 +36,15 @@ Doctor → Department : Restrict
 Si je supprime un département qui contient encore des médecins, la suppression est bloquée. On doit réaffecter les médecins avant de pouvoir supprimer le département.
 Department → Doctor : SetNull
 Si je supprime un médecin qui est responsable d'un département, MedicalDirectorId passe à null. Le département peut ne pas avoir de responsable assigné, en attendant qu'on en assigne un nouveau.
+
+### Comment paginer les résultats ?
+
+On utilise .Skip((page - 1) * pageSize).Take(pageSize) dans la requête LINQ, combiné à un CountAsync() séparé pour connaître le nombre total d'éléments.
+
+### Comment optimiser les requêtes fréquentes ?
+
+On ajoute des index sur les colonnes filtrées fréquemment via HasIndex() dans la configuration  PostgreSQL utilise l'index au lieu de parcourir toute la table.
+
+### Comment éviter de charger des données inutiles ?
+
+On utilise .AsNoTracking() pour les lectures et .Select() pour ne projeter que les colonnes qu'on veut, plutôt que de charger toute l'entité.
