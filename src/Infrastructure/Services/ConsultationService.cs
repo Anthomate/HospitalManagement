@@ -1,52 +1,38 @@
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Application.Consultations.DTOs;
 using Application.Consultations.Interfaces;
 using Domain.Entities;
 using Domain.Enums;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class ConsultationService(HospitalDbContext context) : IConsultationService
+public class ConsultationService(
+    IUnitOfWork uow,
+    ILogger<ConsultationService> logger) : IConsultationService
 {
-    private static ConsultationDto ToDto(Consultation c) => new(
-        c.Id,
-        c.PatientId,
-        $"{c.Patient.FirstName} {c.Patient.LastName}",
-        c.DoctorId,
-        $"{c.Doctor.FirstName} {c.Doctor.LastName}",
-        c.ScheduledAt,
-        c.Status,
-        c.Notes,
-        c.CreatedAt
-    );
-
-    private IQueryable<Consultation> BaseQuery() =>
-        context.Consultations
-            .AsNoTracking()
-            .Include(c => c.Patient)
-            .Include(c => c.Doctor);
-
     public async Task<PagedResult<ConsultationDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = BaseQuery().OrderBy(c => c.ScheduledAt);
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
+        var result = await uow.Consultations.GetAllPagedAsync(pagination, ct);
 
         return new PagedResult<ConsultationDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
+    }
+
+    public async Task<ConsultationDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var consultation = await uow.Consultations.GetByIdAsync(id, ct);
+        return consultation is null ? null : ToDto(consultation);
     }
 
     public async Task<PagedResult<ConsultationDto>> GetByPatientAsync(
@@ -54,22 +40,14 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = BaseQuery()
-            .Where(c => c.PatientId == patientId)
-            .OrderByDescending(c => c.ScheduledAt);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
+        var result = await uow.Consultations.GetByPatientAsync(patientId, pagination, ct);
 
         return new PagedResult<ConsultationDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
@@ -78,21 +56,14 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = BaseQuery()
-            .Where(c => c.DoctorId == doctorId)
-            .OrderBy(c => c.ScheduledAt);
-
-        var totalCount = await query.CountAsync(ct);
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
+        var result = await uow.Consultations.GetByDoctorAsync(doctorId, pagination, ct);
 
         return new PagedResult<ConsultationDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
@@ -101,50 +72,58 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = BaseQuery()
-            .Where(c => c.Status == status)
-            .OrderBy(c => c.ScheduledAt);
-
-        var totalCount = await query.CountAsync(ct);
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
+        var result = await uow.Consultations.GetByStatusAsync(status, pagination, ct);
 
         return new PagedResult<ConsultationDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
-    public async Task<ConsultationDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    public async Task<PagedResult<ConsultationDto>> GetUpcomingByPatientAsync(
+        Guid patientId,
+        PaginationParams pagination,
+        CancellationToken ct = default)
     {
-        return await BaseQuery()
-            .Where(c => c.Id == id)
-            .Select(c => ToDto(c))
-            .FirstOrDefaultAsync(ct);
+        var result = await uow.Consultations.GetUpcomingByPatientAsync(patientId, pagination, ct);
+
+        return new PagedResult<ConsultationDto>
+        {
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
+        };
+    }
+
+    public async Task<IReadOnlyList<ConsultationDto>> GetTodayByDoctorAsync(
+        Guid doctorId,
+        CancellationToken ct = default)
+    {
+        var result = await uow.Consultations.GetTodayByDoctorAsync(doctorId, ct);
+        return result.Select(ToDto).ToList();
     }
 
     public async Task<ConsultationDto> CreateAsync(
         CreateConsultationDto dto,
         CancellationToken ct = default)
     {
-        var patientExists = await context.Patients.AnyAsync(p => p.Id == dto.PatientId, ct);
-        if (!patientExists)
+        logger.LogInformation(
+            "Creating consultation — Patient: {PatientId}, Doctor: {DoctorId}, ScheduledAt: {ScheduledAt}",
+            dto.PatientId, dto.DoctorId, dto.ScheduledAt);
+
+        var patient = await uow.Patients.GetByIdAsync(dto.PatientId, ct);
+        if (patient is null)
             throw new NotFoundException("Patient", dto.PatientId);
 
-        var doctorExists = await context.Doctors.AnyAsync(d => d.Id == dto.DoctorId, ct);
-        if (!doctorExists)
+        var doctor = await uow.Doctors.GetByIdAsync(dto.DoctorId, ct);
+        if (doctor is null)
             throw new NotFoundException("Doctor", dto.DoctorId);
 
-        var slotTaken = await context.Consultations.AnyAsync(
-            c => c.PatientId == dto.PatientId
-              && c.DoctorId == dto.DoctorId
-              && c.ScheduledAt == dto.ScheduledAt, ct);
-
-        if (slotTaken)
+        if (await uow.Consultations.SlotTakenAsync(dto.PatientId, dto.DoctorId, dto.ScheduledAt, ct))
             throw new BusinessRuleException(
                 "This patient already has an appointment with this doctor at the same time.");
 
@@ -156,57 +135,11 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
             Notes       = dto.Notes
         };
 
-        context.Consultations.Add(consultation);
-        await context.SaveChangesAsync(ct);
+        await uow.Consultations.AddAsync(consultation, ct);
+        await uow.SaveChangesAsync(ct);
 
+        logger.LogInformation("Consultation {Id} created successfully", consultation.Id);
         return (await GetByIdAsync(consultation.Id, ct))!;
-    }
-
-    public async Task<PagedResult<ConsultationDto>> GetUpcomingByPatientAsync(
-        Guid patientId,
-        PaginationParams pagination,
-        CancellationToken ct = default)
-    {
-        var now = DateTime.UtcNow;
-
-        var query = BaseQuery()
-            .Where(c => c.PatientId == patientId
-                     && c.ScheduledAt > now
-                     && c.Status == ConsultationStatus.Scheduled)
-            .OrderBy(c => c.ScheduledAt);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
-
-        return new PagedResult<ConsultationDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
-        };
-    }
-
-    public async Task<IReadOnlyList<ConsultationDto>> GetTodayByDoctorAsync(
-        Guid doctorId,
-        CancellationToken ct = default)
-    {
-        var today = DateTime.UtcNow.Date;
-        var tomorrow = today.AddDays(1);
-
-        return await BaseQuery()
-            .Where(c => c.DoctorId == doctorId
-                     && c.ScheduledAt >= today
-                     && c.ScheduledAt < tomorrow
-                     && c.Status != ConsultationStatus.Cancelled)
-            .OrderBy(c => c.ScheduledAt)
-            .Select(c => ToDto(c))
-            .ToListAsync(ct);
     }
 
     public async Task<ConsultationDto?> UpdateStatusAsync(
@@ -214,17 +147,18 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
         ConsultationStatus newStatus,
         CancellationToken ct = default)
     {
-        var consultation = await context.Consultations.FindAsync([id], ct);
+        logger.LogInformation(
+            "Updating status of consultation {ConsultationId} to {Status}", id, newStatus);
+
+        var consultation = await uow.Consultations.GetByIdAsync(id, ct);
         if (consultation is null)
             throw new NotFoundException("Consultation", id);
 
         var allowed = (consultation.Status, newStatus) switch
         {
-            (ConsultationStatus.Scheduled,  ConsultationStatus.Completed)  => true,
-            (ConsultationStatus.Scheduled,  ConsultationStatus.Cancelled)  => true,
-            (ConsultationStatus.Cancelled,  _)                             => false,
-            (ConsultationStatus.Completed,  _)                             => false,
-            _                                                               => false
+            (ConsultationStatus.Scheduled, ConsultationStatus.Completed) => true,
+            (ConsultationStatus.Scheduled, ConsultationStatus.Cancelled) => true,
+            _                                                             => false
         };
 
         if (!allowed)
@@ -232,21 +166,23 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
                 $"Transition from '{consultation.Status}' to '{newStatus}' is not allowed.");
 
         consultation.Status = newStatus;
+        uow.Consultations.Update(consultation);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
+            var entry    = ex.Entries.Single();
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
-                throw new InvalidOperationException("The record was deleted by another user.");
+                throw new NotFoundException("Consultation", id);
 
             throw new ConcurrencyConflictException(
-                "The record was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
+                "The consultation was modified by another user. Please review and retry.",
+                clientValues:   entry.CurrentValues.ToObject(),
                 databaseValues: dbValues.ToObject()
             );
         }
@@ -256,22 +192,31 @@ public class ConsultationService(HospitalDbContext context) : IConsultationServi
 
     public async Task<bool> CancelAsync(Guid id, CancellationToken ct = default)
     {
-        var result = await context.Consultations
-            .Where(c => c.Id == id && c.Status == ConsultationStatus.Scheduled)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(c => c.Status, ConsultationStatus.Cancelled)
-                .SetProperty(c => c.UpdatedAt, DateTime.UtcNow),
-                ct);
+        logger.LogWarning("Cancelling consultation {ConsultationId}", id);
 
-        if (result == 0)
-        {
-            var exists = await context.Consultations.AnyAsync(c => c.Id == id, ct);
-            if (!exists)
-                throw new NotFoundException("Consultation", id);
+        var consultation = await uow.Consultations.GetByIdAsync(id, ct);
+        if (consultation is null)
+            throw new NotFoundException("Consultation", id);
 
+        if (consultation.Status != ConsultationStatus.Scheduled)
             throw new BusinessRuleException("Only scheduled consultations can be cancelled.");
-        }
+
+        consultation.Status = ConsultationStatus.Cancelled;
+        uow.Consultations.Update(consultation);
+        await uow.SaveChangesAsync(ct);
 
         return true;
     }
+
+    private static ConsultationDto ToDto(Consultation c) => new(
+        c.Id,
+        c.PatientId,
+        c.Patient is not null ? $"{c.Patient.FirstName} {c.Patient.LastName}" : string.Empty,
+        c.DoctorId,
+        c.Doctor is not null  ? $"{c.Doctor.FirstName} {c.Doctor.LastName}"   : string.Empty,
+        c.ScheduledAt,
+        c.Status,
+        c.Notes,
+        c.CreatedAt
+    );
 }

@@ -11,6 +11,5 @@ public interface IPatientService
     Task<PatientDto> CreateAsync(CreatePatientDto dto, CancellationToken ct = default);
     Task<PatientDto?> UpdateAsync(Guid id, UpdatePatientDto dto, CancellationToken ct = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
-    Task<PagedResult<PatientDto>> GetAllAlphabeticalAsync(PaginationParams pagination, CancellationToken ct = default);
     Task<PagedResult<PatientDto>> SearchByNameAsync(string name, PaginationParams pagination, CancellationToken ct = default);
 }

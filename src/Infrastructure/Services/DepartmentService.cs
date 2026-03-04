@@ -1,77 +1,37 @@
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Application.Departments.DTOs;
 using Application.Departments.Interfaces;
 using Domain.Entities;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class DepartmentService(HospitalDbContext context, ILogger<DepartmentService> logger) : IDepartmentService
+public class DepartmentService(
+    IUnitOfWork uow,
+    ILogger<DepartmentService> logger) : IDepartmentService
 {
-    private static DepartmentDto ToDto(Domain.Entities.Department d, int doctorCount) => new(
-        d.Id,
-        d.Name,
-        d.Location,
-        d.MedicalDirector != null
-            ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
-            : null,
-        doctorCount,
-        d.CreatedAt
-    );
-
     public async Task<PagedResult<DepartmentDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Departments
-            .AsNoTracking()
-            .OrderBy(d => d.Name);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(d => new DepartmentDto(
-                d.Id,
-                d.Name,
-                d.Location,
-                d.MedicalDirector != null
-                    ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
-                    : null,
-                d.StaffMembers.OfType<Doctor>().Count(),
-                d.CreatedAt
-            ))
-            .ToListAsync(ct);
+        var result = await uow.Departments.GetAllPagedAsync(pagination, ct);
 
         return new PagedResult<DepartmentDto>
         {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
+            Items      = result.Items.Select(d => ToDto(d)).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
     public async Task<DepartmentDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        return await context.Departments
-            .AsNoTracking()
-            .Where(d => d.Id == id)
-            .Select(d => new DepartmentDto(
-                d.Id,
-                d.Name,
-                d.Location,
-                d.MedicalDirector != null
-                    ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
-                    : null,
-                d.StaffMembers.OfType<Doctor>().Count(),
-                d.CreatedAt
-            ))
-            .FirstOrDefaultAsync(ct);
+        var dept = await uow.Departments.GetByIdAsync(id, ct);
+        return dept is null ? null : ToDto(dept);
     }
 
     public async Task<DepartmentDto> CreateAsync(
@@ -80,59 +40,33 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
     {
         logger.LogInformation("Creating department {Name}", dto.Name);
 
-        var nameExists = await context.Departments
-            .AnyAsync(d => d.Name == dto.Name, ct);
-        if (nameExists)
+        if (await uow.Departments.ExistsByNameAsync(dto.Name, null, ct))
             throw new AlreadyExistsException("Department", "Name", dto.Name);
 
         var department = new Department { Name = dto.Name, Location = dto.Location };
-        context.Departments.Add(department);
-        await context.SaveChangesAsync(ct);
+
+        await uow.Departments.AddAsync(department, ct);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation("Department {Id} created successfully", department.Id);
-        return (await GetByIdAsync(department.Id, ct))!;
+        return ToDto(department);
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
-    {
-        logger.LogWarning("Attempting to delete department {DepartmentId}", id);
-
-        var hasDoctors = await context.Doctors
-            .AnyAsync(d => d.DepartmentId == id, ct);
-        if (hasDoctors)
-            throw new BusinessRuleException(
-                "Cannot delete a department that still has doctors. Reassign them first.");
-
-        var deleted = await context.Departments
-            .Where(d => d.Id == id)
-            .ExecuteDeleteAsync(ct);
-
-        if (deleted > 0)
-            logger.LogWarning("Department {DepartmentId} deleted", id);
-
-        return deleted > 0;
-    }
-    
     public async Task<DepartmentDto?> UpdateAsync(
         Guid id,
         UpdateDepartmentDto dto,
         CancellationToken ct = default)
     {
-        var department = await context.Departments.FindAsync([id], ct);
+        var department = await uow.Departments.GetByIdAsync(id, ct);
         if (department is null) return null;
 
-        var nameExists = await context.Departments
-            .AnyAsync(d => d.Name == dto.Name && d.Id != id, ct);
-
-        if (nameExists)
+        if (await uow.Departments.ExistsByNameAsync(dto.Name, id, ct))
             throw new AlreadyExistsException("Department", "Name", dto.Name);
 
         if (dto.MedicalDirectorId.HasValue)
         {
-            var doctorInDept = await context.Doctors.AnyAsync(
-                d => d.Id == dto.MedicalDirectorId && d.DepartmentId == id, ct);
-
-            if (!doctorInDept)
+            var doctor = await uow.Doctors.GetByIdAsync(dto.MedicalDirectorId.Value, ct);
+            if (doctor is null || doctor.DepartmentId != id)
                 throw new BusinessRuleException(
                     "The medical director must be a doctor belonging to this department.");
         }
@@ -141,25 +75,50 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
         department.Location          = dto.Location;
         department.MedicalDirectorId = dto.MedicalDirectorId;
 
+        uow.Departments.Update(department);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
+            var entry    = ex.Entries.Single();
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
-                throw new InvalidOperationException("The record was deleted by another user.");
+                throw new NotFoundException("Department", id);
 
             throw new ConcurrencyConflictException(
-                "The record was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
+                "The department was modified by another user. Please review and retry.",
+                clientValues:   entry.CurrentValues.ToObject(),
                 databaseValues: dbValues.ToObject()
             );
         }
-        return (await GetByIdAsync(id, ct))!;
+
+        return ToDto(department);
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        logger.LogWarning("Attempting to delete department {DepartmentId}", id);
+
+        var department = await uow.Departments.GetByIdAsync(id, ct);
+        if (department is null) return false;
+
+        if (await uow.Departments.HasStaffMembersAsync(id, ct))
+            throw new BusinessRuleException(
+                "Cannot delete a department that still has staff members. Reassign them first.");
+
+        if (await uow.Departments.HasSubDepartmentsAsync(id, ct))
+            throw new BusinessRuleException(
+                "Cannot delete a department that has sub-departments. Reassign them first.");
+
+        uow.Departments.Remove(department);
+        await uow.SaveChangesAsync(ct);
+
+        logger.LogWarning("Department {DepartmentId} deleted", id);
+        return true;
     }
 
     public async Task<DepartmentDto?> AssignDirectorAsync(
@@ -167,81 +126,61 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
         Guid doctorId,
         CancellationToken ct = default)
     {
-        var department = await context.Departments.FindAsync([departmentId], ct);
+        var department = await uow.Departments.GetByIdAsync(departmentId, ct);
         if (department is null) return null;
 
-        var doctorInDept = await context.Doctors.AnyAsync(
-            d => d.Id == doctorId && d.DepartmentId == departmentId, ct);
-        if (!doctorInDept)
+        var doctor = await uow.Doctors.GetByIdAsync(doctorId, ct);
+        if (doctor is null || doctor.DepartmentId != departmentId)
             throw new BusinessRuleException(
                 "The medical director must be a doctor belonging to this department.");
 
         department.MedicalDirectorId = doctorId;
-        await context.SaveChangesAsync(ct);
+        uow.Departments.Update(department);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation(
             "Doctor {DoctorId} assigned as director of department {DepartmentId}",
             doctorId, departmentId);
 
-        return (await GetByIdAsync(departmentId, ct))!;
+        return ToDto(department);
     }
 
     public async Task<DepartmentDto?> RemoveDirectorAsync(
         Guid departmentId,
         CancellationToken ct = default)
     {
-        var department = await context.Departments.FindAsync([departmentId], ct);
+        var department = await uow.Departments.GetByIdAsync(departmentId, ct);
         if (department is null) return null;
 
         department.MedicalDirectorId = null;
-        await context.SaveChangesAsync(ct);
+        uow.Departments.Update(department);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation(
             "Medical director removed from department {DepartmentId}", departmentId);
 
-        return (await GetByIdAsync(departmentId, ct))!;
+        return ToDto(department);
     }
-    
+
     public async Task<IReadOnlyList<DepartmentTreeDto>> GetDepartmentTreeAsync(
         CancellationToken ct = default)
     {
-        var all = await context.Departments
-            .AsNoTracking()
-            .OrderBy(d => d.Name)
-            .Select(d => new
-            {
-                d.Id,
-                d.Name,
-                d.Location,
-                d.ParentDepartmentId,
-                MedicalDirectorName = d.MedicalDirector != null
-                    ? d.MedicalDirector.FirstName + " " + d.MedicalDirector.LastName
-                    : null,
-                DoctorCount = d.StaffMembers.OfType<Doctor>().Count(),
-            })
-            .ToListAsync(ct);
-
-        DepartmentTreeDto BuildNode(Guid? parentId) =>
-            throw new NotImplementedException();
+        var all = await uow.Departments.GetAllWithDetailsAsync(ct);
 
         var lookup = all.ToLookup(d => d.ParentDepartmentId);
 
-        DepartmentTreeDto ToTree(Guid id)
-        {
-            var d = all.First(x => x.Id == id);
-            return new DepartmentTreeDto(
-                d.Id,
-                d.Name,
-                d.Location,
-                d.MedicalDirectorName,
-                d.DoctorCount,
-                lookup[d.Id].Select(child => ToTree(child.Id)).ToList()
-            );
-        }
+        DepartmentTreeDto ToTree(Department d) => new(
+            d.Id,
+            d.Name,
+            d.Location,
+            d.MedicalDirector is not null
+                ? $"{d.MedicalDirector.FirstName} {d.MedicalDirector.LastName}"
+                : null,
+            d.StaffMembers.OfType<Doctor>().Count(),
+            lookup[d.Id].Select(child => ToTree(child)).ToList()
+        );
 
-        return lookup[null]
-            .Select(d => ToTree(d.Id))
-            .ToList();
+        return lookup[null].Select(d => ToTree(d)).ToList();
     }
 
     public async Task<DepartmentDto?> SetParentAsync(
@@ -249,7 +188,7 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
         Guid? parentId,
         CancellationToken ct = default)
     {
-        var department = await context.Departments.FindAsync([departmentId], ct);
+        var department = await uow.Departments.GetByIdAsync(departmentId, ct);
         if (department is null) return null;
 
         if (parentId.HasValue)
@@ -257,17 +196,18 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
             if (parentId == departmentId)
                 throw new BusinessRuleException("A department cannot be its own parent.");
 
-            var wouldCycle = await CreatesCycleAsync(departmentId, parentId.Value, ct);
-            if (wouldCycle)
+            if (await CreatesCycleAsync(departmentId, parentId.Value, ct))
                 throw new BusinessRuleException(
                     "This assignment would create a circular hierarchy.");
         }
 
         department.ParentDepartmentId = parentId;
-        await context.SaveChangesAsync(ct);
-        return (await GetByIdAsync(departmentId, ct))!;
-    }
+        uow.Departments.Update(department);
+        await uow.SaveChangesAsync(ct);
 
+        return ToDto(department);
+    }
+    
     private async Task<bool> CreatesCycleAsync(
         Guid departmentId,
         Guid candidateParentId,
@@ -279,12 +219,21 @@ public class DepartmentService(HospitalDbContext context, ILogger<DepartmentServ
         {
             if (currentId == departmentId) return true;
 
-            currentId = await context.Departments
-                .Where(d => d.Id == currentId)
-                .Select(d => d.ParentDepartmentId)
-                .FirstOrDefaultAsync(ct);
+            var parent = await uow.Departments.GetByIdAsync(currentId.Value, ct);
+            currentId = parent?.ParentDepartmentId;
         }
 
         return false;
     }
+
+    private static DepartmentDto ToDto(Department d) => new(
+        d.Id,
+        d.Name,
+        d.Location,
+        d.MedicalDirector is not null
+            ? $"{d.MedicalDirector.FirstName} {d.MedicalDirector.LastName}"
+            : null,
+        d.StaffMembers.OfType<Doctor>().Count(),
+        d.CreatedAt
+    );
 }

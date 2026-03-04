@@ -6,7 +6,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DashboardController(IDashboardService service, ILogger<DashboardController> logger) : ControllerBase
+public class DashboardController(IDashboardService service) : ControllerBase
 {
     [HttpGet("patients/{patientId:guid}/record")]
     public async Task<ActionResult<PatientRecordDto>> GetPatientRecord(

@@ -1,39 +1,30 @@
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Application.Nurses.DTOs;
 using Application.Nurses.Interfaces;
 using Domain.Entities;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
 public class NurseService(
-    HospitalDbContext context,
+    IUnitOfWork uow,
     ILogger<NurseService> logger) : INurseService
 {
     public async Task<PagedResult<NurseDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Nurses.AsNoTracking().OrderBy(n => n.LastName);
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(n => new NurseDto(
-                n.Id, n.FirstName, n.LastName,
-                n.Email, n.Phone, n.Address, n.HireDate, n.Salary,
-                n.LicenseNumber, n.Service, n.Grade,
-                n.DepartmentId, n.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.Nurses.GetAllPagedAsync(pagination, ct);
 
         return new PagedResult<NurseDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
@@ -42,41 +33,21 @@ public class NurseService(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Nurses
-            .AsNoTracking()
-            .Where(n => n.DepartmentId == departmentId)
-            .OrderBy(n => n.LastName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(n => new NurseDto(
-                n.Id, n.FirstName, n.LastName,
-                n.Email, n.Phone, n.Address, n.HireDate, n.Salary,
-                n.LicenseNumber, n.Service, n.Grade,
-                n.DepartmentId, n.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.Nurses.GetByDepartmentAsync(departmentId, pagination, ct);
 
         return new PagedResult<NurseDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
     public async Task<NurseDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        return await context.Nurses
-            .AsNoTracking()
-            .Where(n => n.Id == id)
-            .Select(n => new NurseDto(
-                n.Id, n.FirstName, n.LastName,
-                n.Email, n.Phone, n.Address, n.HireDate, n.Salary,
-                n.LicenseNumber, n.Service, n.Grade,
-                n.DepartmentId, n.Department.Name))
-            .FirstOrDefaultAsync(ct);
+        var nurse = await uow.Nurses.GetByIdAsync(id, ct);
+        return nurse is null ? null : ToDto(nurse);
     }
 
     public async Task<NurseDto> CreateAsync(
@@ -87,19 +58,14 @@ public class NurseService(
             "Creating nurse {FirstName} {LastName} with license {LicenseNumber}",
             dto.FirstName, dto.LastName, dto.LicenseNumber);
 
-        var emailExists = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email, ct);
-        if (emailExists)
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, null, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var licenseExists = await context.MedicalStaffs
-            .AnyAsync(m => m.LicenseNumber == dto.LicenseNumber, ct);
-        if (licenseExists)
+        if (await uow.Nurses.ExistsByLicenseNumberAsync(dto.LicenseNumber, null, ct))
             throw new AlreadyExistsException("MedicalStaff", "LicenseNumber", dto.LicenseNumber);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
         var nurse = new Nurse
@@ -117,8 +83,8 @@ public class NurseService(
             DepartmentId  = dto.DepartmentId
         };
 
-        context.Nurses.Add(nurse);
-        await context.SaveChangesAsync(ct);
+        await uow.Nurses.AddAsync(nurse, ct);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation("Nurse {Id} created successfully", nurse.Id);
         return (await GetByIdAsync(nurse.Id, ct))!;
@@ -129,17 +95,14 @@ public class NurseService(
         UpdateNurseDto dto,
         CancellationToken ct = default)
     {
-        var nurse = await context.Nurses.FindAsync([id], ct);
+        var nurse = await uow.Nurses.GetByIdAsync(id, ct);
         if (nurse is null) return null;
 
-        var emailTaken = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email && s.Id != id, ct);
-        if (emailTaken)
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, id, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
         nurse.FirstName    = dto.FirstName;
@@ -153,13 +116,15 @@ public class NurseService(
         nurse.Grade        = dto.Grade;
         nurse.DepartmentId = dto.DepartmentId;
 
+        uow.Nurses.Update(nurse);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
+            var entry    = ex.Entries.Single();
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
@@ -167,7 +132,7 @@ public class NurseService(
 
             throw new ConcurrencyConflictException(
                 "The nurse was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
+                clientValues:   entry.CurrentValues.ToObject(),
                 databaseValues: dbValues.ToObject()
             );
         }
@@ -180,13 +145,21 @@ public class NurseService(
     {
         logger.LogWarning("Attempting to delete nurse {NurseId}", id);
 
-        var deleted = await context.Nurses
-            .Where(n => n.Id == id)
-            .ExecuteDeleteAsync(ct);
+        var nurse = await uow.Nurses.GetByIdAsync(id, ct);
+        if (nurse is null) return false;
 
-        if (deleted > 0)
-            logger.LogWarning("Nurse {NurseId} deleted", id);
+        uow.Nurses.Remove(nurse);
+        await uow.SaveChangesAsync(ct);
 
-        return deleted > 0;
+        logger.LogWarning("Nurse {NurseId} deleted", id);
+        return true;
     }
+
+    private static NurseDto ToDto(Nurse n) => new(
+        n.Id, n.FirstName, n.LastName,
+        n.Email, n.Phone, n.Address,
+        n.HireDate, n.Salary,
+        n.LicenseNumber, n.Service, n.Grade,
+        n.DepartmentId, n.Department?.Name ?? string.Empty
+    );
 }

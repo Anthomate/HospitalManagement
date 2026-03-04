@@ -1,61 +1,68 @@
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Application.Patients.DTOs;
 using Application.Patients.Interfaces;
 using Domain.Entities;
-using Domain.Enums;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class PatientService(HospitalDbContext context, ILogger<PatientService> logger) : IPatientService
+public class PatientService(
+    IUnitOfWork uow,
+    ILogger<PatientService> logger) : IPatientService
 {
     public async Task<PagedResult<PatientDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Patients
-            .AsNoTracking()
-            .OrderBy(p => p.LastName)
-            .ThenBy(p => p.FirstName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(p => ToDto(p))
-            .ToListAsync(ct);
+        var result = await uow.Patients.GetAllAlphabeticalAsync(pagination, ct);
 
         return new PagedResult<PatientDto>
         {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
+        };
+    }
+
+    public async Task<PagedResult<PatientDto>> SearchByNameAsync(
+        string name,
+        PaginationParams pagination,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return new PagedResult<PatientDto>
+            {
+                Items = [], TotalCount = 0,
+                Page = pagination.Page, PageSize = pagination.PageSize
+            };
+
+        var result = await uow.Patients.SearchByNameAsync(name, pagination, ct);
+
+        return new PagedResult<PatientDto>
+        {
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
     public async Task<PatientDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        return await context.Patients
-            .AsNoTracking()
-            .Where(p => p.Id == id)
-            .Select(p => ToDto(p))
-            .FirstOrDefaultAsync(ct);
+        var patient = await uow.Patients.GetByIdAsync(id, ct);
+        return patient is null ? null : ToDto(patient);
     }
 
     public async Task<PatientDto?> GetByRecordNumberAsync(
         string recordNumber,
         CancellationToken ct = default)
     {
-        return await context.Patients
-            .AsNoTracking()
-            .Where(p => p.RecordNumber == recordNumber)
-            .Select(p => ToDto(p))
-            .FirstOrDefaultAsync(ct);
+        var patient = await uow.Patients.GetByRecordNumberAsync(recordNumber, ct);
+        return patient is null ? null : ToDto(patient);
     }
 
     public async Task<PatientDto> CreateAsync(
@@ -66,14 +73,10 @@ public class PatientService(HospitalDbContext context, ILogger<PatientService> l
             "Creating patient {FirstName} {LastName} with RecordNumber {RecordNumber}",
             dto.FirstName, dto.LastName, dto.RecordNumber);
 
-        var recordExists = await context.Patients
-            .AnyAsync(p => p.RecordNumber == dto.RecordNumber, ct);
-        if (recordExists)
+        if (await uow.Patients.ExistsByRecordNumberAsync(dto.RecordNumber, ct))
             throw new AlreadyExistsException("Patient", "RecordNumber", dto.RecordNumber);
 
-        var emailExists = await context.Patients
-            .AnyAsync(p => p.Email == dto.Email, ct);
-        if (emailExists)
+        if (await uow.Patients.ExistsByEmailAsync(dto.Email, null, ct))
             throw new AlreadyExistsException("Patient", "Email", dto.Email);
 
         var patient = new Patient
@@ -87,8 +90,8 @@ public class PatientService(HospitalDbContext context, ILogger<PatientService> l
             Address      = dto.Address
         };
 
-        context.Patients.Add(patient);
-        await context.SaveChangesAsync(ct);
+        await uow.Patients.AddAsync(patient, ct);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation("Patient {Id} created successfully", patient.Id);
         return ToDto(patient);
@@ -99,12 +102,10 @@ public class PatientService(HospitalDbContext context, ILogger<PatientService> l
         UpdatePatientDto dto,
         CancellationToken ct = default)
     {
-        var patient = await context.Patients.FindAsync([id], ct);
+        var patient = await uow.Patients.GetByIdAsync(id, ct);
         if (patient is null) return null;
 
-        var emailTaken = await context.Patients
-            .AnyAsync(p => p.Email == dto.Email && p.Id != id, ct);
-        if (emailTaken)
+        if (await uow.Patients.ExistsByEmailAsync(dto.Email, id, ct))
             throw new AlreadyExistsException("Patient", "Email", dto.Email);
 
         patient.FirstName = dto.FirstName;
@@ -114,120 +115,50 @@ public class PatientService(HospitalDbContext context, ILogger<PatientService> l
         patient.Phone     = dto.Phone;
         patient.Address   = dto.Address;
 
+        uow.Patients.Update(patient);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
-            var dbValues = await entry.GetDatabaseValuesAsync(ct);
+            var entry     = ex.Entries.Single();
+            var dbValues  = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
                 throw new NotFoundException("Patient", id);
 
             throw new ConcurrencyConflictException(
                 "The patient was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
-                databaseValues: dbValues.ToObject()
-            );
+                clientValues:   entry.CurrentValues.ToObject(),
+                databaseValues: dbValues.ToObject());
         }
 
         logger.LogInformation("Patient {Id} updated successfully", id);
         return ToDto(patient);
     }
 
-
-    public async Task<PagedResult<PatientDto>> GetAllAlphabeticalAsync(
-        PaginationParams pagination,
-        CancellationToken ct = default)
-    {
-        var query = context.Patients
-            .AsNoTracking()
-            .OrderBy(p => p.LastName)
-            .ThenBy(p => p.FirstName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(p => ToDto(p))
-            .ToListAsync(ct);
-
-        return new PagedResult<PatientDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
-        };
-    }
-
-    public async Task<PagedResult<PatientDto>> SearchByNameAsync(
-        string name,
-        PaginationParams pagination,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            return new PagedResult<PatientDto>
-            {
-                Items = [],
-                TotalCount = 0,
-                Page = pagination.Page,
-                PageSize = pagination.PageSize
-            };
-
-        var normalized = name.Trim().ToLower();
-
-        var query = context.Patients
-            .AsNoTracking()
-            .Where(p =>
-                p.LastName.ToLower().Contains(normalized) ||
-                p.FirstName.ToLower().Contains(normalized))
-            .OrderBy(p => p.LastName)
-            .ThenBy(p => p.FirstName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(p => ToDto(p))
-            .ToListAsync(ct);
-
-        return new PagedResult<PatientDto>
-        {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
-        };
-    }
-
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         logger.LogWarning("Attempting to delete patient {PatientId}", id);
 
-        var hasActiveConsultations = await context.Consultations.AnyAsync(
-            c => c.PatientId == id && c.Status != ConsultationStatus.Cancelled, ct);
-        if (hasActiveConsultations)
+        var patient = await uow.Patients.GetByIdAsync(id, ct);
+        if (patient is null) return false;
+
+        if (await uow.Patients.HasActiveConsultationsAsync(id, ct))
             throw new BusinessRuleException(
                 "Cannot delete a patient with active or completed consultations. " +
                 "Cancel all consultations before deleting.");
 
-        var deleted = await context.Patients
-            .Where(p => p.Id == id)
-            .ExecuteDeleteAsync(ct);
+        uow.Patients.Remove(patient);
+        await uow.SaveChangesAsync(ct);
 
-        if (deleted > 0)
-            logger.LogWarning("Patient {PatientId} deleted", id);
-
-        return deleted > 0;
+        logger.LogWarning("Patient {PatientId} deleted", id);
+        return true;
     }
 
     private static PatientDto ToDto(Patient p) => new(
         p.Id, p.FirstName, p.LastName, p.BirthDate,
-        p.RecordNumber, p.Email, p.Phone, p.Address, p.CreatedAt
-    ); 
+        p.RecordNumber, p.Email, p.Phone, p.Address, p.CreatedAt);
 }

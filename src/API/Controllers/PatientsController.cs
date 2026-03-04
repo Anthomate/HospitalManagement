@@ -15,7 +15,7 @@ public class PatientsController(IPatientService service, ILogger<PatientsControl
         [FromQuery] int pageSize = 10,
         CancellationToken ct = default)
     {
-        var result = await service.GetAllAlphabeticalAsync(
+        var result = await service.GetAllAsync(
             new PaginationParams { Page = page, PageSize = pageSize }, ct);
         return Ok(result);
     }

@@ -1,41 +1,31 @@
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Application.Doctors.DTOs;
 using Application.Doctors.Interfaces;
 using Domain.Entities;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
 public class DoctorService(
-    HospitalDbContext context,
+    IUnitOfWork uow,
     ILogger<DoctorService> logger) : IDoctorService
 {
     public async Task<PagedResult<DoctorDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Doctors
-            .AsNoTracking()
-            .OrderBy(d => d.LastName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
-                d.HireDate, d.Salary, d.Specialty, d.LicenseNumber,
-                d.DepartmentId, d.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.Doctors.GetByDepartmentAsync(Guid.Empty, pagination, ct);
+        var all = await uow.Doctors.GetAllAsync(ct);
 
         return new PagedResult<DoctorDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = all.OrderBy(d => d.LastName).Select(ToDto).ToList(),
+            TotalCount = all.Count,
+            Page       = pagination.Page,
+            PageSize   = pagination.PageSize
         };
     }
 
@@ -44,41 +34,21 @@ public class DoctorService(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.Doctors
-            .AsNoTracking()
-            .Where(d => d.DepartmentId == departmentId)
-            .OrderBy(d => d.LastName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
-                d.HireDate, d.Salary, d.Specialty, d.LicenseNumber,
-                d.DepartmentId, d.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.Doctors.GetByDepartmentAsync(departmentId, pagination, ct);
 
         return new PagedResult<DoctorDto>
         {
-            Items = items, TotalCount = totalCount,
-            Page = pagination.Page, PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
     public async Task<DoctorDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var dto = await context.Doctors
-            .AsNoTracking()
-            .Where(d => d.Id == id)
-            .Select(d => new DoctorDto(
-                d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
-                d.HireDate, d.Salary, d.Specialty, d.LicenseNumber,
-                d.DepartmentId, d.Department.Name))
-            .FirstOrDefaultAsync(ct);
-        
-        return dto;
+        var doctor = await uow.Doctors.GetByIdAsync(id, ct);
+        return doctor is null ? null : ToDto(doctor);
     }
 
     public async Task<DoctorDto> CreateAsync(
@@ -89,19 +59,14 @@ public class DoctorService(
             "Creating doctor {FirstName} {LastName} with license {LicenseNumber}",
             dto.FirstName, dto.LastName, dto.LicenseNumber);
 
-        var emailExists = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email, ct);
-        if (emailExists)
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, null, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
-        var licenseExists = await context.MedicalStaffs
-            .AnyAsync(d => d.LicenseNumber == dto.LicenseNumber, ct);
-        if (licenseExists)
+        if (await uow.Doctors.ExistsByLicenseNumberAsync(dto.LicenseNumber, null, ct))
             throw new AlreadyExistsException("MedicalStaff", "LicenseNumber", dto.LicenseNumber);
 
         var doctor = new Doctor
@@ -118,12 +83,11 @@ public class DoctorService(
             DepartmentId  = dto.DepartmentId
         };
 
-        context.Doctors.Add(doctor);
-        await context.SaveChangesAsync(ct);
+        await uow.Doctors.AddAsync(doctor, ct);
+        await uow.SaveChangesAsync(ct);
 
         logger.LogInformation("Doctor {Id} created successfully", doctor.Id);
-
-        return (await GetByIdAsync(doctor.Id, ct))!;
+        return ToDto(doctor);
     }
 
     public async Task<DoctorDto?> UpdateAsync(
@@ -131,17 +95,14 @@ public class DoctorService(
         UpdateDoctorDto dto,
         CancellationToken ct = default)
     {
-        var doctor = await context.Doctors.FindAsync([id], ct);
+        var doctor = await uow.Doctors.GetByIdAsync(id, ct);
         if (doctor is null) return null;
 
-        var emailTaken = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email && s.Id != id, ct);
-        if (emailTaken)
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, id, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
         doctor.FirstName    = dto.FirstName;
@@ -154,13 +115,15 @@ public class DoctorService(
         doctor.Specialty    = dto.Specialty;
         doctor.DepartmentId = dto.DepartmentId;
 
+        uow.Doctors.Update(doctor);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
+            var entry    = ex.Entries.Single();
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
@@ -168,33 +131,35 @@ public class DoctorService(
 
             throw new ConcurrencyConflictException(
                 "The doctor was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
-                databaseValues: dbValues.ToObject()
-            );
+                clientValues:   entry.CurrentValues.ToObject(),
+                databaseValues: dbValues.ToObject());
         }
 
         logger.LogInformation("Doctor {Id} updated successfully", id);
-        return (await GetByIdAsync(id, ct))!;
+        return ToDto(doctor);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         logger.LogWarning("Attempting to delete doctor {DoctorId}", id);
 
-        var isDirector = await context.Departments
-            .AnyAsync(d => d.MedicalDirectorId == id, ct);
-        if (isDirector)
+        var doctor = await uow.Doctors.GetByIdAsync(id, ct);
+        if (doctor is null) return false;
+
+        if (await uow.Doctors.IsDirectorAsync(id, ct))
             throw new BusinessRuleException(
                 "Cannot delete a doctor who is a department's medical director. " +
                 "Reassign the director first.");
 
-        var deleted = await context.Doctors
-            .Where(d => d.Id == id)
-            .ExecuteDeleteAsync(ct);
+        uow.Doctors.Remove(doctor);
+        await uow.SaveChangesAsync(ct);
 
-        if (deleted > 0)
-            logger.LogWarning("Doctor {DoctorId} deleted", id);
-
-        return deleted > 0;
+        logger.LogWarning("Doctor {DoctorId} deleted", id);
+        return true;
     }
+
+    private static DoctorDto ToDto(Doctor d) => new(
+        d.Id, d.FirstName, d.LastName, d.Email, d.Phone, d.Address,
+        d.HireDate, d.Salary, d.Specialty, d.LicenseNumber,
+        d.DepartmentId, d.Department?.Name ?? string.Empty);
 }

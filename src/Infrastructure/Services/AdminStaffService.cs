@@ -2,41 +2,29 @@ using Application.AdminStaff.DTOs;
 using Application.AdminStaff.Interfaces;
 using Application.Common;
 using Application.Common.Exceptions;
+using Application.Common.Interfaces;
 using Domain.Entities;
-using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
-public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
+public class AdminStaffService(
+    IUnitOfWork uow,
+    ILogger<AdminStaffService> logger) : IAdminStaffService
 {
     public async Task<PagedResult<AdminStaffDto>> GetAllAsync(
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.AdminStaffs
-            .AsNoTracking()
-            .OrderBy(a => a.LastName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(a => new AdminStaffDto(
-                a.Id, a.FirstName, a.LastName,
-                a.Email, a.Phone, a.Address,
-                a.HireDate, a.Salary,
-                a.Function,
-                a.DepartmentId, a.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.AdminStaffs.GetAllPagedAsync(pagination, ct);
 
         return new PagedResult<AdminStaffDto>
         {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
@@ -45,60 +33,36 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         PaginationParams pagination,
         CancellationToken ct = default)
     {
-        var query = context.AdminStaffs
-            .AsNoTracking()
-            .Where(a => a.DepartmentId == departmentId)
-            .OrderBy(a => a.LastName);
-
-        var totalCount = await query.CountAsync(ct);
-
-        var items = await query
-            .Skip((pagination.Page - 1) * pagination.PageSize)
-            .Take(pagination.PageSize)
-            .Select(a => new AdminStaffDto(
-                a.Id, a.FirstName, a.LastName,
-                a.Email, a.Phone, a.Address,
-                a.HireDate, a.Salary,
-                a.Function,
-                a.DepartmentId, a.Department.Name))
-            .ToListAsync(ct);
+        var result = await uow.AdminStaffs.GetByDepartmentAsync(departmentId, pagination, ct);
 
         return new PagedResult<AdminStaffDto>
         {
-            Items = items,
-            TotalCount = totalCount,
-            Page = pagination.Page,
-            PageSize = pagination.PageSize
+            Items      = result.Items.Select(ToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page       = result.Page,
+            PageSize   = result.PageSize
         };
     }
 
     public async Task<AdminStaffDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        return await context.AdminStaffs
-            .AsNoTracking()
-            .Where(a => a.Id == id)
-            .Select(a => new AdminStaffDto(
-                a.Id, a.FirstName, a.LastName,
-                a.Email, a.Phone, a.Address,
-                a.HireDate, a.Salary,
-                a.Function,
-                a.DepartmentId, a.Department.Name))
-            .FirstOrDefaultAsync(ct);
+        var adminStaff = await uow.AdminStaffs.GetByIdAsync(id, ct);
+        return adminStaff is null ? null : ToDto(adminStaff);
     }
 
     public async Task<AdminStaffDto> CreateAsync(
         CreateAdminStaffDto dto,
         CancellationToken ct = default)
     {
-        var emailExists = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email, ct);
-        if (emailExists)
+        logger.LogInformation(
+            "Creating admin staff {FirstName} {LastName} with function {Function}",
+            dto.FirstName, dto.LastName, dto.Function);
+
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, null, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
         var adminStaff = new AdminStaff
@@ -114,9 +78,10 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
             DepartmentId = dto.DepartmentId
         };
 
-        context.AdminStaffs.Add(adminStaff);
-        await context.SaveChangesAsync(ct);
+        await uow.AdminStaffs.AddAsync(adminStaff, ct);
+        await uow.SaveChangesAsync(ct);
 
+        logger.LogInformation("AdminStaff {Id} created successfully", adminStaff.Id);
         return (await GetByIdAsync(adminStaff.Id, ct))!;
     }
 
@@ -125,17 +90,14 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         UpdateAdminStaffDto dto,
         CancellationToken ct = default)
     {
-        var adminStaff = await context.AdminStaffs.FindAsync([id], ct);
+        var adminStaff = await uow.AdminStaffs.GetByIdAsync(id, ct);
         if (adminStaff is null) return null;
 
-        var emailTaken = await context.StaffMembers
-            .AnyAsync(s => s.Email == dto.Email && s.Id != id, ct);
-        if (emailTaken)
+        if (await uow.StaffMembers.ExistsByEmailAsync(dto.Email, id, ct))
             throw new AlreadyExistsException("Staff", "Email", dto.Email);
 
-        var deptExists = await context.Departments
-            .AnyAsync(d => d.Id == dto.DepartmentId, ct);
-        if (!deptExists)
+        var dept = await uow.Departments.GetByIdAsync(dto.DepartmentId, ct);
+        if (dept is null)
             throw new NotFoundException("Department", dto.DepartmentId);
 
         adminStaff.FirstName    = dto.FirstName;
@@ -148,33 +110,50 @@ public class AdminStaffService(HospitalDbContext context) : IAdminStaffService
         adminStaff.Function     = dto.Function;
         adminStaff.DepartmentId = dto.DepartmentId;
 
+        uow.AdminStaffs.Update(adminStaff);
+
         try
         {
-            await context.SaveChangesAsync(ct);
+            await uow.SaveChangesAsync(ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            var entry = ex.Entries.Single();
+            var entry    = ex.Entries.Single();
             var dbValues = await entry.GetDatabaseValuesAsync(ct);
 
             if (dbValues is null)
-                throw new InvalidOperationException("The record was deleted by another user.");
+                throw new NotFoundException("AdminStaff", id);
 
             throw new ConcurrencyConflictException(
-                "The record was modified by another user. Please review and retry.",
-                clientValues: entry.CurrentValues.ToObject(),
+                "The admin staff was modified by another user. Please review and retry.",
+                clientValues:   entry.CurrentValues.ToObject(),
                 databaseValues: dbValues.ToObject()
             );
         }
+
+        logger.LogInformation("AdminStaff {Id} updated successfully", id);
         return (await GetByIdAsync(id, ct))!;
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var deleted = await context.AdminStaffs
-            .Where(a => a.Id == id)
-            .ExecuteDeleteAsync(ct);
+        logger.LogWarning("Attempting to delete admin staff {AdminStaffId}", id);
 
-        return deleted > 0;
+        var adminStaff = await uow.AdminStaffs.GetByIdAsync(id, ct);
+        if (adminStaff is null) return false;
+
+        uow.AdminStaffs.Remove(adminStaff);
+        await uow.SaveChangesAsync(ct);
+
+        logger.LogWarning("AdminStaff {AdminStaffId} deleted", id);
+        return true;
     }
+
+    private static AdminStaffDto ToDto(AdminStaff a) => new(
+        a.Id, a.FirstName, a.LastName,
+        a.Email, a.Phone, a.Address,
+        a.HireDate, a.Salary,
+        a.Function,
+        a.DepartmentId, a.Department?.Name ?? string.Empty
+    );
 }
